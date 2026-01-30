@@ -71,15 +71,29 @@ func (s *Scheduler) run() {
 	// Track in-flight checks
 	var inflightWg sync.WaitGroup
 
-	ticker := time.NewTicker(checkInterval)
-	defer ticker.Stop()
-
-	// Also listen for metadata changes to sync servers
+	// Listen for metadata changes
 	metadataChanged := make(chan int, 1)
 	s.metadataStore.AddChangeListener(metadataChanged)
 
-	// Initial sync
-	s.syncServersFromMetadata()
+	// Wait for metadata to be available (either already loaded or wait for first load)
+	for {
+		metadata := s.metadataStore.GetMetadata()
+		if metadata != nil && len(metadata.Entities) > 0 {
+			log.Println("Metadata available, starting health checks")
+			s.syncServersFromMetadata()
+			break
+		}
+		log.Println("Waiting for metadata to load...")
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-metadataChanged:
+			// Loop will check if metadata is now available
+		}
+	}
+
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
