@@ -19,6 +19,10 @@ type Scheduler struct {
 	checksPerMinute  int
 	minCheckInterval time.Duration
 
+	// Track servers currently being checked to avoid duplicate checks
+	inFlight     map[string]bool
+	inFlightLock sync.Mutex
+
 	// For graceful shutdown
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -42,6 +46,7 @@ func NewScheduler(
 		maxParallel:      maxParallel,
 		checksPerMinute:  checksPerMinute,
 		minCheckInterval: minCheckInterval,
+		inFlight:         make(map[string]bool),
 		ctx:              ctx,
 		cancel:           cancel,
 	}
@@ -57,6 +62,30 @@ func (s *Scheduler) Start() {
 func (s *Scheduler) Stop() {
 	s.cancel()
 	s.wg.Wait()
+}
+
+// serverKey creates a unique key for a server
+func serverKey(entityID, baseURI string) string {
+	return entityID + "|" + baseURI
+}
+
+// markInFlight marks a server as being checked. Returns false if already in-flight.
+func (s *Scheduler) markInFlight(entityID, baseURI string) bool {
+	s.inFlightLock.Lock()
+	defer s.inFlightLock.Unlock()
+	key := serverKey(entityID, baseURI)
+	if s.inFlight[key] {
+		return false
+	}
+	s.inFlight[key] = true
+	return true
+}
+
+// clearInFlight marks a server as no longer being checked
+func (s *Scheduler) clearInFlight(entityID, baseURI string) {
+	s.inFlightLock.Lock()
+	defer s.inFlightLock.Unlock()
+	delete(s.inFlight, serverKey(entityID, baseURI))
 }
 
 func (s *Scheduler) run() {
@@ -106,8 +135,8 @@ func (s *Scheduler) run() {
 			s.syncServersFromMetadata()
 
 		case <-ticker.C:
-			// Get a server that needs checking
-			servers, err := s.store.GetServersNeedingCheck(s.minCheckInterval, 1)
+			// Get servers that need checking (fetch a few to find one not in-flight)
+			servers, err := s.store.GetServersNeedingCheck(s.minCheckInterval, s.maxParallel+1)
 			if err != nil {
 				log.Printf("Error getting servers to check: %v", err)
 				continue
@@ -117,12 +146,24 @@ func (s *Scheduler) run() {
 				continue
 			}
 
-			server := servers[0]
+			// Find first server not already in-flight
+			var server *store.ServerToCheck
+			for _, srv := range servers {
+				if s.markInFlight(srv.EntityID, srv.BaseURI) {
+					server = srv
+					break
+				}
+			}
+			if server == nil {
+				// All candidates are already being checked
+				continue
+			}
 
 			// Find the server in metadata to get pins
 			metadata := s.getServerFromMetadata(server.EntityID, server.BaseURI)
 			if metadata == nil {
 				// Server no longer in metadata, will be cleaned up on next sync
+				s.clearInFlight(server.EntityID, server.BaseURI)
 				continue
 			}
 
@@ -130,15 +171,17 @@ func (s *Scheduler) run() {
 			select {
 			case semaphore <- struct{}{}:
 				inflightWg.Add(1)
-				go func(entityID string, srv fedtls.Server) {
+				go func(entityID, baseURI string, srv fedtls.Server) {
 					defer func() {
 						<-semaphore
 						inflightWg.Done()
+						s.clearInFlight(entityID, baseURI)
 					}()
 					s.checkServer(entityID, srv)
-				}(server.EntityID, *metadata)
+				}(server.EntityID, server.BaseURI, *metadata)
 			default:
 				// All parallel slots in use, skip this tick
+				s.clearInFlight(server.EntityID, server.BaseURI)
 			}
 		}
 	}
