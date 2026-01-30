@@ -97,9 +97,10 @@ func (s *Store) GetStatus(entityID, baseURI string) (*ServerStatus, error) {
 		WHERE entity_id = ? AND base_uri = ?
 	`
 	status := &ServerStatus{}
+	var errorMessage, certCN, certFingerprint sql.NullString
 	err := s.db.QueryRow(query, entityID, baseURI).Scan(
 		&status.EntityID, &status.BaseURI, &status.LastChecked, &status.IsHealthy,
-		&status.ErrorMessage, &status.CertExpires, &status.CertCN, &status.CertFingerprint,
+		&errorMessage, &status.CertExpires, &certCN, &certFingerprint,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -107,6 +108,9 @@ func (s *Store) GetStatus(entityID, baseURI string) (*ServerStatus, error) {
 	if err != nil {
 		return nil, err
 	}
+	status.ErrorMessage = errorMessage.String
+	status.CertCN = certCN.String
+	status.CertFingerprint = certFingerprint.String
 	return status, nil
 }
 
@@ -127,12 +131,16 @@ func (s *Store) GetAllStatuses() ([]*ServerStatus, error) {
 	var statuses []*ServerStatus
 	for rows.Next() {
 		status := &ServerStatus{}
+		var errorMessage, certCN, certFingerprint sql.NullString
 		if err := rows.Scan(
 			&status.EntityID, &status.BaseURI, &status.LastChecked, &status.IsHealthy,
-			&status.ErrorMessage, &status.CertExpires, &status.CertCN, &status.CertFingerprint,
+			&errorMessage, &status.CertExpires, &certCN, &certFingerprint,
 		); err != nil {
 			return nil, err
 		}
+		status.ErrorMessage = errorMessage.String
+		status.CertCN = certCN.String
+		status.CertFingerprint = certFingerprint.String
 		statuses = append(statuses, status)
 	}
 	return statuses, rows.Err()
