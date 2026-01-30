@@ -1,0 +1,23 @@
+# matfmonitor configuration example
+#
+# All settings can be overridden with environment variables using the
+# MATFMONITOR_ prefix (e.g., MATFMONITOR_LISTENADDRESS=:9090)
+
+# Federation metadata settings (required)
+metadataURL: https://md.example.com/federation.jws
+jwksPath: /path/to/jwks
+cachePath: /path/to/metadata-cache.json
+
+# Database settings
+databasePath: ./matfmonitor.db
+
+# Web server settings
+listenAddress: :8080
+
+# Health check limits
+maxParallelChecks: 5    # Maximum concurrent TLS checks
+checksPerMinute: 20     # Rate limit for checks per minute
+minCheckInterval: 5h    # Minimum time between checks of the same server
+
+# TLS settings
+tlsTimeout: 10s         # Timeout for TLS handshake
