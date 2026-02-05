@@ -38,8 +38,10 @@ func TestSaveAndGetStatus(t *testing.T) {
 	healthy := true
 
 	status := &ServerStatus{
-		EntityID:        "https://example.com",
-		BaseURI:         "https://api.example.com",
+		ServerKey: ServerKey{
+			EntityID: "https://example.com",
+			BaseURI:  "https://api.example.com",
+		},
 		LastChecked:     &now,
 		IsHealthy:       &healthy,
 		ErrorMessage:    "all good",
@@ -108,8 +110,10 @@ func TestSaveStatusWithNullFields(t *testing.T) {
 
 	// Save status with minimal fields (NULLs for optional fields)
 	status := &ServerStatus{
-		EntityID: "https://example.com",
-		BaseURI:  "https://api.example.com",
+		ServerKey: ServerKey{
+			EntityID: "https://example.com",
+			BaseURI:  "https://api.example.com",
+		},
 		// All other fields are nil/empty
 	}
 
@@ -199,16 +203,14 @@ func TestGetServersNeedingCheck(t *testing.T) {
 	recentTime := time.Now().Add(-1 * time.Hour)
 	healthy := true
 	s.SaveStatus(&ServerStatus{
-		EntityID:    "https://entity.com",
-		BaseURI:     "https://recent.com",
+		ServerKey:   ServerKey{EntityID: "https://entity.com", BaseURI: "https://recent.com"},
 		LastChecked: &recentTime,
 		IsHealthy:   &healthy,
 	})
 
 	oldTime := time.Now().Add(-10 * time.Hour)
 	s.SaveStatus(&ServerStatus{
-		EntityID:    "https://entity.com",
-		BaseURI:     "https://old.com",
+		ServerKey:   ServerKey{EntityID: "https://entity.com", BaseURI: "https://old.com"},
 		LastChecked: &oldTime,
 		IsHealthy:   &healthy,
 	})
@@ -244,8 +246,7 @@ func TestGetServersNeedingCheckWithPriority(t *testing.T) {
 	// Add a server checked long ago (should normally be second)
 	oldTime := time.Now().Add(-10 * time.Hour)
 	s.SaveStatus(&ServerStatus{
-		EntityID:    "https://entity.com",
-		BaseURI:     "https://old.com",
+		ServerKey:   ServerKey{EntityID: "https://entity.com", BaseURI: "https://old.com"},
 		LastChecked: &oldTime,
 		IsHealthy:   &healthy,
 	})
@@ -253,16 +254,14 @@ func TestGetServersNeedingCheckWithPriority(t *testing.T) {
 	// Add a recently checked server (should normally NOT appear with 5hr interval)
 	recentTime := time.Now().Add(-1 * time.Hour)
 	s.SaveStatus(&ServerStatus{
-		EntityID:    "https://entity.com",
-		BaseURI:     "https://recent.com",
+		ServerKey:   ServerKey{EntityID: "https://entity.com", BaseURI: "https://recent.com"},
 		LastChecked: &recentTime,
 		IsHealthy:   &healthy,
 	})
 
 	// Add another recently checked server
 	s.SaveStatus(&ServerStatus{
-		EntityID:    "https://entity.com",
-		BaseURI:     "https://recent2.com",
+		ServerKey:   ServerKey{EntityID: "https://entity.com", BaseURI: "https://recent2.com"},
 		LastChecked: &recentTime,
 		IsHealthy:   &healthy,
 	})
@@ -312,8 +311,7 @@ func TestGetServersNeedingCheckPriorityLimit(t *testing.T) {
 	// Add several recently checked servers
 	for i := 0; i < 5; i++ {
 		s.SaveStatus(&ServerStatus{
-			EntityID:    "https://entity.com",
-			BaseURI:     "https://server" + string(rune('A'+i)) + ".com",
+			ServerKey:   ServerKey{EntityID: "https://entity.com", BaseURI: "https://server" + string(rune('A'+i)) + ".com"},
 			LastChecked: &recentTime,
 			IsHealthy:   &healthy,
 		})
@@ -384,8 +382,7 @@ func TestGetServersNeedingCheckEmptyPriority(t *testing.T) {
 	oldTime := time.Now().Add(-10 * time.Hour)
 	healthy := true
 	s.SaveStatus(&ServerStatus{
-		EntityID:    "https://entity.com",
-		BaseURI:     "https://old.com",
+		ServerKey:   ServerKey{EntityID: "https://entity.com", BaseURI: "https://old.com"},
 		LastChecked: &oldTime,
 		IsHealthy:   &healthy,
 	})
@@ -419,7 +416,7 @@ func TestRemoveServersNotIn(t *testing.T) {
 	s.EnsureServerExists("https://entity.com", "https://remove.com")
 
 	// Remove servers not in list
-	keepList := []struct{ EntityID, BaseURI string }{
+	keepList := []ServerKey{
 		{"https://entity.com", "https://keep1.com"},
 		{"https://entity.com", "https://keep2.com"},
 	}

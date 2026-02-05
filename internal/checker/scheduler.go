@@ -193,11 +193,11 @@ func (s *Scheduler) syncServersFromMetadata() {
 		return
 	}
 
-	var currentServers []struct{ EntityID, BaseURI string }
+	var currentServers []store.ServerKey
 
 	for _, entity := range parsed.Entities {
 		for _, server := range entity.Servers {
-			currentServers = append(currentServers, struct{ EntityID, BaseURI string }{
+			currentServers = append(currentServers, store.ServerKey{
 				EntityID: entity.EntityID,
 				BaseURI:  server.BaseURI,
 			})
@@ -241,8 +241,10 @@ func (s *Scheduler) checkServer(entityID string, server fedtls.Server) {
 	result := s.checker.Check(entityID, server)
 
 	status := &store.ServerStatus{
-		EntityID:        result.EntityID,
-		BaseURI:         result.BaseURI,
+		ServerKey: store.ServerKey{
+			EntityID: result.EntityID,
+			BaseURI:  result.BaseURI,
+		},
 		LastChecked:     &result.CheckedAt,
 		IsHealthy:       &result.IsHealthy,
 		ErrorMessage:    result.ErrorMessage,

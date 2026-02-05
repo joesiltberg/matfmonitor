@@ -9,10 +9,15 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// ServerKey identifies a server by entity and base URI
+type ServerKey struct {
+	EntityID string
+	BaseURI  string
+}
+
 // ServerStatus represents the health check status of a server
 type ServerStatus struct {
-	EntityID        string
-	BaseURI         string
+	ServerKey
 	LastChecked     *time.Time
 	IsHealthy       *bool
 	ErrorMessage    string
@@ -146,16 +151,9 @@ func (s *Store) GetAllStatuses() ([]*ServerStatus, error) {
 	return statuses, rows.Err()
 }
 
-// ServerKey identifies a server by entity and base URI
-type ServerKey struct {
-	EntityID string
-	BaseURI  string
-}
-
 // ServerToCheck represents a server that may need checking
 type ServerToCheck struct {
-	EntityID    string
-	BaseURI     string
+	ServerKey
 	LastChecked *time.Time
 }
 
@@ -218,8 +216,7 @@ func (s *Store) GetServersNeedingCheck(minInterval time.Duration, limit int, pri
 			return nil, err
 		}
 		// Skip if this server was already added as a priority server
-		key := ServerKey{EntityID: server.EntityID, BaseURI: server.BaseURI}
-		if _, isPriority := prioritySet[key]; isPriority {
+		if _, isPriority := prioritySet[server.ServerKey]; isPriority {
 			continue
 		}
 		servers = append(servers, server)
@@ -238,7 +235,7 @@ func (s *Store) EnsureServerExists(entityID, baseURI string) error {
 }
 
 // RemoveServersNotIn removes servers that are not in the provided list
-func (s *Store) RemoveServersNotIn(servers []struct{ EntityID, BaseURI string }) error {
+func (s *Store) RemoveServersNotIn(servers []ServerKey) error {
 	if len(servers) == 0 {
 		// Don't delete everything if list is empty (metadata might be temporarily unavailable)
 		return nil
@@ -260,8 +257,8 @@ func (s *Store) RemoveServersNotIn(servers []struct{ EntityID, BaseURI string })
 	if err != nil {
 		return err
 	}
-	for _, s := range servers {
-		if _, err := stmt.Exec(s.EntityID, s.BaseURI); err != nil {
+	for _, srv := range servers {
+		if _, err := stmt.Exec(srv.EntityID, srv.BaseURI); err != nil {
 			stmt.Close()
 			return err
 		}
