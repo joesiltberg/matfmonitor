@@ -146,6 +146,12 @@ func (s *Store) GetAllStatuses() ([]*ServerStatus, error) {
 	return statuses, rows.Err()
 }
 
+// ServerKey identifies a server by entity and base URI
+type ServerKey struct {
+	EntityID string
+	BaseURI  string
+}
+
 // ServerToCheck represents a server that may need checking
 type ServerToCheck struct {
 	EntityID    string
@@ -154,9 +160,42 @@ type ServerToCheck struct {
 }
 
 // GetServersNeedingCheck returns servers that haven't been checked recently,
-// ordered by last_checked (oldest first, NULL first)
-func (s *Store) GetServersNeedingCheck(minInterval time.Duration, limit int) ([]*ServerToCheck, error) {
+// ordered by last_checked (oldest first, NULL first).
+// Priority servers are returned first regardless of their last_checked time.
+func (s *Store) GetServersNeedingCheck(minInterval time.Duration, limit int, priority []ServerKey) ([]*ServerToCheck, error) {
+	var servers []*ServerToCheck
+
+	// First, fetch priority servers (regardless of last_checked time)
+	for _, p := range priority {
+		if len(servers) >= limit {
+			break
+		}
+		query := `SELECT entity_id, base_uri, last_checked FROM server_status WHERE entity_id = ? AND base_uri = ?`
+		server := &ServerToCheck{}
+		err := s.db.QueryRow(query, p.EntityID, p.BaseURI).Scan(&server.EntityID, &server.BaseURI, &server.LastChecked)
+		if err == sql.ErrNoRows {
+			continue // Priority server not in database, skip it
+		}
+		if err != nil {
+			return nil, err
+		}
+		servers = append(servers, server)
+	}
+
+	// If we've hit the limit with priority servers, return early
+	if len(servers) >= limit {
+		return servers, nil
+	}
+
+	// Build a set of priority server keys to exclude from the normal query
+	prioritySet := make(map[ServerKey]struct{}, len(priority))
+	for _, p := range priority {
+		prioritySet[p] = struct{}{}
+	}
+
+	// Fetch remaining servers that need checking
 	cutoff := time.Now().Add(-minInterval)
+	remaining := limit - len(servers)
 	query := `
 		SELECT entity_id, base_uri, last_checked
 		FROM server_status
@@ -164,17 +203,24 @@ func (s *Store) GetServersNeedingCheck(minInterval time.Duration, limit int) ([]
 		ORDER BY last_checked IS NOT NULL, last_checked ASC
 		LIMIT ?
 	`
-	rows, err := s.db.Query(query, cutoff, limit)
+	rows, err := s.db.Query(query, cutoff, remaining+len(priority)) // Fetch extra to account for filtering
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var servers []*ServerToCheck
 	for rows.Next() {
+		if len(servers) >= limit {
+			break
+		}
 		server := &ServerToCheck{}
 		if err := rows.Scan(&server.EntityID, &server.BaseURI, &server.LastChecked); err != nil {
 			return nil, err
+		}
+		// Skip if this server was already added as a priority server
+		key := ServerKey{EntityID: server.EntityID, BaseURI: server.BaseURI}
+		if _, isPriority := prioritySet[key]; isPriority {
+			continue
 		}
 		servers = append(servers, server)
 	}
