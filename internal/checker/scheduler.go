@@ -136,7 +136,7 @@ func (s *Scheduler) run() {
 
 		case <-ticker.C:
 			// Get servers that need checking (fetch a few to find one not in-flight)
-			servers, err := s.store.GetServersNeedingCheck(s.minCheckInterval, s.maxParallel+1, nil)
+			servers, err := s.store.GetServersNeedingCheck(s.minCheckInterval, s.maxParallel+1, nil, 0)
 			if err != nil {
 				log.Printf("Error getting servers to check: %v", err)
 				continue

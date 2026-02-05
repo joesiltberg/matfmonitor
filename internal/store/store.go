@@ -159,20 +159,21 @@ type ServerToCheck struct {
 
 // GetServersNeedingCheck returns servers that haven't been checked recently,
 // ordered by last_checked (oldest first, NULL first).
-// Priority servers are returned first regardless of their last_checked time.
-func (s *Store) GetServersNeedingCheck(minInterval time.Duration, limit int, priority []ServerKey) ([]*ServerToCheck, error) {
+// Priority servers are returned first, but still respect priorityMinInterval.
+func (s *Store) GetServersNeedingCheck(minInterval time.Duration, limit int, priority []ServerKey, priorityMinInterval time.Duration) ([]*ServerToCheck, error) {
 	var servers []*ServerToCheck
+	priorityCutoff := time.Now().Add(-priorityMinInterval)
 
-	// First, fetch priority servers (regardless of last_checked time)
+	// First, fetch priority servers (with their own interval check)
 	for _, p := range priority {
 		if len(servers) >= limit {
 			break
 		}
-		query := `SELECT entity_id, base_uri, last_checked FROM server_status WHERE entity_id = ? AND base_uri = ?`
+		query := `SELECT entity_id, base_uri, last_checked FROM server_status WHERE entity_id = ? AND base_uri = ? AND (last_checked IS NULL OR last_checked < ?)`
 		server := &ServerToCheck{}
-		err := s.db.QueryRow(query, p.EntityID, p.BaseURI).Scan(&server.EntityID, &server.BaseURI, &server.LastChecked)
+		err := s.db.QueryRow(query, p.EntityID, p.BaseURI, priorityCutoff).Scan(&server.EntityID, &server.BaseURI, &server.LastChecked)
 		if err == sql.ErrNoRows {
-			continue // Priority server not in database, skip it
+			continue // Priority server not in database or checked too recently, skip it
 		}
 		if err != nil {
 			return nil, err

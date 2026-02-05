@@ -216,7 +216,7 @@ func TestGetServersNeedingCheck(t *testing.T) {
 	})
 
 	// With 5 hour interval, should get never-checked and old, but not recent
-	servers, err := s.GetServersNeedingCheck(5*time.Hour, 10, nil)
+	servers, err := s.GetServersNeedingCheck(5*time.Hour, 10, nil, 0)
 	if err != nil {
 		t.Fatalf("GetServersNeedingCheck() error = %v", err)
 	}
@@ -270,7 +270,7 @@ func TestGetServersNeedingCheckWithPriority(t *testing.T) {
 	priority := []ServerKey{
 		{EntityID: "https://entity.com", BaseURI: "https://recent.com"},
 	}
-	servers, err := s.GetServersNeedingCheck(5*time.Hour, 10, priority)
+	servers, err := s.GetServersNeedingCheck(5*time.Hour, 10, priority, 1*time.Minute)
 	if err != nil {
 		t.Fatalf("GetServersNeedingCheck() error = %v", err)
 	}
@@ -295,6 +295,51 @@ func TestGetServersNeedingCheckWithPriority(t *testing.T) {
 	}
 	if countRecent != 1 {
 		t.Errorf("Priority server appeared %d times, want 1", countRecent)
+	}
+}
+
+func TestGetServersNeedingCheckPriorityMinInterval(t *testing.T) {
+	s, err := New(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer s.Close()
+
+	healthy := true
+
+	// Add a server checked 30 seconds ago
+	veryRecentTime := time.Now().Add(-30 * time.Second)
+	s.SaveStatus(&ServerStatus{
+		ServerKey:   ServerKey{EntityID: "https://entity.com", BaseURI: "https://very-recent.com"},
+		LastChecked: &veryRecentTime,
+		IsHealthy:   &healthy,
+	})
+
+	// Add a server checked 2 minutes ago
+	twoMinutesAgo := time.Now().Add(-2 * time.Minute)
+	s.SaveStatus(&ServerStatus{
+		ServerKey:   ServerKey{EntityID: "https://entity.com", BaseURI: "https://two-min-ago.com"},
+		LastChecked: &twoMinutesAgo,
+		IsHealthy:   &healthy,
+	})
+
+	// Both are priority servers, but with 1 minute priority interval,
+	// only the one checked 2 minutes ago should be returned
+	priority := []ServerKey{
+		{EntityID: "https://entity.com", BaseURI: "https://very-recent.com"},
+		{EntityID: "https://entity.com", BaseURI: "https://two-min-ago.com"},
+	}
+	servers, err := s.GetServersNeedingCheck(5*time.Hour, 10, priority, 1*time.Minute)
+	if err != nil {
+		t.Fatalf("GetServersNeedingCheck() error = %v", err)
+	}
+
+	// Should only get the server checked 2 minutes ago (respects priorityMinInterval)
+	if len(servers) != 1 {
+		t.Errorf("GetServersNeedingCheck() returned %d servers, want 1", len(servers))
+	}
+	if len(servers) > 0 && servers[0].BaseURI != "https://two-min-ago.com" {
+		t.Errorf("Server = %v, want two-min-ago.com", servers[0].BaseURI)
 	}
 }
 
@@ -323,7 +368,7 @@ func TestGetServersNeedingCheckPriorityLimit(t *testing.T) {
 		{EntityID: "https://entity.com", BaseURI: "https://serverB.com"},
 		{EntityID: "https://entity.com", BaseURI: "https://serverC.com"},
 	}
-	servers, err := s.GetServersNeedingCheck(5*time.Hour, 2, priority)
+	servers, err := s.GetServersNeedingCheck(5*time.Hour, 2, priority, 1*time.Minute)
 	if err != nil {
 		t.Fatalf("GetServersNeedingCheck() error = %v", err)
 	}
@@ -356,7 +401,7 @@ func TestGetServersNeedingCheckPriorityNonExistent(t *testing.T) {
 	priority := []ServerKey{
 		{EntityID: "https://entity.com", BaseURI: "https://nonexistent.com"},
 	}
-	servers, err := s.GetServersNeedingCheck(5*time.Hour, 10, priority)
+	servers, err := s.GetServersNeedingCheck(5*time.Hour, 10, priority, 1*time.Minute)
 	if err != nil {
 		t.Fatalf("GetServersNeedingCheck() error = %v", err)
 	}
@@ -388,7 +433,7 @@ func TestGetServersNeedingCheckEmptyPriority(t *testing.T) {
 	})
 
 	// Empty priority slice should behave the same as nil
-	servers, err := s.GetServersNeedingCheck(5*time.Hour, 10, []ServerKey{})
+	servers, err := s.GetServersNeedingCheck(5*time.Hour, 10, []ServerKey{}, 1*time.Minute)
 	if err != nil {
 		t.Fatalf("GetServersNeedingCheck() error = %v", err)
 	}
