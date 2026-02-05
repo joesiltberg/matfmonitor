@@ -25,9 +25,11 @@ type Config struct {
 	ListenAddress string `yaml:"listenAddress"`
 
 	// Health check limits
-	MaxParallelChecks int           `yaml:"maxParallelChecks"`
-	ChecksPerMinute   int           `yaml:"checksPerMinute"`
-	MinCheckInterval  time.Duration `yaml:"minCheckInterval"`
+	MaxParallelChecks   int           `yaml:"maxParallelChecks"`
+	ChecksPerMinute     int           `yaml:"checksPerMinute"`
+	MinCheckInterval    time.Duration `yaml:"minCheckInterval"`
+	PriorityMinInterval time.Duration `yaml:"priorityMinInterval"`
+	MaxPriorityServers  int           `yaml:"maxPriorityServers"`
 
 	// TLS settings
 	TLSTimeout time.Duration `yaml:"tlsTimeout"`
@@ -36,12 +38,14 @@ type Config struct {
 // DefaultConfig returns a Config with default values
 func DefaultConfig() *Config {
 	return &Config{
-		DatabasePath:      "./matfmonitor.db",
-		ListenAddress:     ":8080",
-		MaxParallelChecks: 5,
-		ChecksPerMinute:   20,
-		MinCheckInterval:  5 * time.Hour,
-		TLSTimeout:        10 * time.Second,
+		DatabasePath:        "./matfmonitor.db",
+		ListenAddress:       ":8080",
+		MaxParallelChecks:   5,
+		ChecksPerMinute:     20,
+		MinCheckInterval:    5 * time.Hour,
+		PriorityMinInterval: 1 * time.Minute,
+		MaxPriorityServers:  5,
+		TLSTimeout:          10 * time.Second,
 	}
 }
 

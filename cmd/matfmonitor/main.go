@@ -55,6 +55,8 @@ func main() {
 		cfg.MaxParallelChecks,
 		cfg.ChecksPerMinute,
 		cfg.MinCheckInterval,
+		cfg.PriorityMinInterval,
+		cfg.MaxPriorityServers,
 	)
 
 	// Initialize web handler

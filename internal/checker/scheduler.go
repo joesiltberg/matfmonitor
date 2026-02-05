@@ -19,6 +19,13 @@ type Scheduler struct {
 	checksPerMinute  int
 	minCheckInterval time.Duration
 
+	// Priority server configuration
+	priorityMinInterval time.Duration
+	maxPriorityServers  int
+	priorityServers     []store.ServerKey
+	priorityLock        sync.Mutex
+	priorityChan        chan store.ServerKey
+
 	// Track servers currently being checked to avoid duplicate checks
 	inFlight     map[string]bool
 	inFlightLock sync.Mutex
@@ -32,23 +39,39 @@ type Scheduler struct {
 // NewScheduler creates a new Scheduler
 func NewScheduler(
 	checker Checker,
-	store *store.Store,
+	dataStore *store.Store,
 	metadataStore *fedtls.MetadataStore,
 	maxParallel int,
 	checksPerMinute int,
 	minCheckInterval time.Duration,
+	priorityMinInterval time.Duration,
+	maxPriorityServers int,
 ) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Scheduler{
-		checker:          checker,
-		store:            store,
-		metadataStore:    metadataStore,
-		maxParallel:      maxParallel,
-		checksPerMinute:  checksPerMinute,
-		minCheckInterval: minCheckInterval,
-		inFlight:         make(map[string]bool),
-		ctx:              ctx,
-		cancel:           cancel,
+		checker:             checker,
+		store:               dataStore,
+		metadataStore:       metadataStore,
+		maxParallel:         maxParallel,
+		checksPerMinute:     checksPerMinute,
+		minCheckInterval:    minCheckInterval,
+		priorityMinInterval: priorityMinInterval,
+		maxPriorityServers:  maxPriorityServers,
+		priorityChan:        make(chan store.ServerKey, maxPriorityServers),
+		inFlight:            make(map[string]bool),
+		ctx:                 ctx,
+		cancel:              cancel,
+	}
+}
+
+// RequestPriorityCheck requests a server to be checked with priority.
+// Returns true if the request was accepted, false if the priority queue is full.
+func (s *Scheduler) RequestPriorityCheck(server store.ServerKey) bool {
+	select {
+	case s.priorityChan <- server:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -64,8 +87,8 @@ func (s *Scheduler) Stop() {
 	s.wg.Wait()
 }
 
-// serverKey creates a unique key for a server
-func serverKey(entityID, baseURI string) string {
+// serverKeyString creates a unique string key for a server
+func serverKeyString(entityID, baseURI string) string {
 	return entityID + "|" + baseURI
 }
 
@@ -73,7 +96,7 @@ func serverKey(entityID, baseURI string) string {
 func (s *Scheduler) markInFlight(entityID, baseURI string) bool {
 	s.inFlightLock.Lock()
 	defer s.inFlightLock.Unlock()
-	key := serverKey(entityID, baseURI)
+	key := serverKeyString(entityID, baseURI)
 	if s.inFlight[key] {
 		return false
 	}
@@ -85,7 +108,7 @@ func (s *Scheduler) markInFlight(entityID, baseURI string) bool {
 func (s *Scheduler) clearInFlight(entityID, baseURI string) {
 	s.inFlightLock.Lock()
 	defer s.inFlightLock.Unlock()
-	delete(s.inFlight, serverKey(entityID, baseURI))
+	delete(s.inFlight, serverKeyString(entityID, baseURI))
 }
 
 func (s *Scheduler) run() {
@@ -134,9 +157,18 @@ func (s *Scheduler) run() {
 		case <-metadataChanged:
 			s.syncServersFromMetadata()
 
+		case priorityServer := <-s.priorityChan:
+			s.addPriorityServer(priorityServer)
+
 		case <-ticker.C:
+			// Get current priority servers
+			s.priorityLock.Lock()
+			priority := make([]store.ServerKey, len(s.priorityServers))
+			copy(priority, s.priorityServers)
+			s.priorityLock.Unlock()
+
 			// Get servers that need checking (fetch a few to find one not in-flight)
-			servers, err := s.store.GetServersNeedingCheck(s.minCheckInterval, s.maxParallel+1, nil, 0)
+			servers, err := s.store.GetServersNeedingCheck(s.minCheckInterval, s.maxParallel+1, priority, s.priorityMinInterval)
 			if err != nil {
 				log.Printf("Error getting servers to check: %v", err)
 				continue
@@ -178,11 +210,45 @@ func (s *Scheduler) run() {
 						s.clearInFlight(entityID, baseURI)
 					}()
 					s.checkServer(entityID, srv)
+					s.removePriorityServer(store.ServerKey{EntityID: entityID, BaseURI: baseURI})
 				}(server.EntityID, server.BaseURI, *metadata)
 			default:
 				// All parallel slots in use, skip this tick
 				s.clearInFlight(server.EntityID, server.BaseURI)
 			}
+		}
+	}
+}
+
+// addPriorityServer adds a server to the priority list if there's room and it's not already present
+func (s *Scheduler) addPriorityServer(server store.ServerKey) {
+	s.priorityLock.Lock()
+	defer s.priorityLock.Unlock()
+
+	// Check if already in list
+	for _, p := range s.priorityServers {
+		if p == server {
+			return
+		}
+	}
+
+	// Check limit
+	if len(s.priorityServers) >= s.maxPriorityServers {
+		return
+	}
+
+	s.priorityServers = append(s.priorityServers, server)
+}
+
+// removePriorityServer removes a server from the priority list
+func (s *Scheduler) removePriorityServer(server store.ServerKey) {
+	s.priorityLock.Lock()
+	defer s.priorityLock.Unlock()
+
+	for i, p := range s.priorityServers {
+		if p == server {
+			s.priorityServers = append(s.priorityServers[:i], s.priorityServers[i+1:]...)
+			return
 		}
 	}
 }
