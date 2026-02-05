@@ -184,6 +184,20 @@
             padding: 40px;
             color: #666;
         }
+
+        .check-now-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+        .check-now-btn:hover {
+            background: #2980b9;
+        }
     </style>
 </head>
 <body>
@@ -236,6 +250,9 @@
                             {{else}}
                             <span class="last-checked">Not yet checked</span>
                             {{end}}
+                            {{if .CanRequestCheck}}
+                            <button type="button" class="check-now-btn" onclick="requestCheck('{{.EntityID}}', '{{.BaseURI}}')">Check Soon</button>
+                            {{end}}
                             {{if .CertCN}}
                             <span>CN: {{.CertCN}}</span>
                             {{end}}
@@ -262,5 +279,30 @@
     <p class="refresh-info">
         Page generated at {{.GeneratedAt}} · Refresh the page to see updates
     </p>
+
+    <script>
+    function requestCheck(entityId, baseUri) {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = 'Requesting...';
+        
+        const formData = new FormData();
+        formData.append('entity_id', entityId);
+        formData.append('base_uri', baseUri);
+        
+        fetch('/request-check', {
+            method: 'POST',
+            body: formData
+        }).then(response => response.json()).then(data => {
+            btn.textContent = 'Refreshing...';
+            setTimeout(() => {
+                window.location.reload();
+            }, data.refresh_ms || 1000);
+        }).catch(() => {
+            btn.disabled = false;
+            btn.textContent = 'Check Soon';
+        });
+    }
+    </script>
 </body>
 </html>

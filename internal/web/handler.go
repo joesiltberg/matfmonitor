@@ -3,6 +3,7 @@ package web
 
 import (
 	"embed"
+	"encoding/json"
 	"html/template"
 	"log"
 	"net/http"
@@ -16,24 +17,35 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
+// PriorityRequester is an interface for requesting priority checks
+type PriorityRequester interface {
+	RequestPriorityCheck(server store.ServerKey) bool
+}
+
 // Handler handles HTTP requests for the status page
 type Handler struct {
-	store         *store.Store
-	metadataStore *fedtls.MetadataStore
-	template      *template.Template
+	store               *store.Store
+	metadataStore       *fedtls.MetadataStore
+	template            *template.Template
+	priorityRequester   PriorityRequester
+	priorityMinInterval time.Duration
+	refreshInterval     time.Duration
 }
 
 // NewHandler creates a new Handler
-func NewHandler(store *store.Store, metadataStore *fedtls.MetadataStore) (*Handler, error) {
+func NewHandler(store *store.Store, metadataStore *fedtls.MetadataStore, priorityRequester PriorityRequester, priorityMinInterval time.Duration, refreshInterval time.Duration) (*Handler, error) {
 	tmpl, err := template.ParseFS(templateFS, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
 
 	return &Handler{
-		store:         store,
-		metadataStore: metadataStore,
-		template:      tmpl,
+		store:               store,
+		metadataStore:       metadataStore,
+		template:            tmpl,
+		priorityRequester:   priorityRequester,
+		priorityMinInterval: priorityMinInterval,
+		refreshInterval:     refreshInterval,
 	}, nil
 }
 
@@ -49,6 +61,7 @@ type EntityView struct {
 
 // ServerView represents a server for display
 type ServerView struct {
+	EntityID             string
 	BaseURI              string
 	Tags                 []string
 	HealthStatus         string // "healthy", "unhealthy", or "unchecked"
@@ -59,6 +72,7 @@ type ServerView struct {
 	CertCN               string
 	CertExpires          *time.Time
 	CertExpiresFormatted string
+	CanRequestCheck      bool
 }
 
 // PageData is the data passed to the template
@@ -72,6 +86,11 @@ type PageData struct {
 
 // ServeHTTP handles the HTTP request
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/request-check" && r.Method == http.MethodPost {
+		h.handleRequestCheck(w, r)
+		return
+	}
+
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
@@ -84,6 +103,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error executing template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
+}
+
+func (h *Handler) handleRequestCheck(w http.ResponseWriter, r *http.Request) {
+	entityID := r.FormValue("entity_id")
+	baseURI := r.FormValue("base_uri")
+
+	if entityID != "" && baseURI != "" {
+		h.priorityRequester.RequestPriorityCheck(store.ServerKey{
+			EntityID: entityID,
+			BaseURI:  baseURI,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{
+		"refresh_ms": int(h.refreshInterval.Milliseconds()),
+	})
 }
 
 func (h *Handler) buildPageData() PageData {
@@ -142,8 +178,9 @@ func (h *Handler) buildPageData() PageData {
 
 		for _, server := range entity.Servers {
 			sv := ServerView{
-				BaseURI: server.BaseURI,
-				Tags:    server.Tags,
+				EntityID: entity.EntityID,
+				BaseURI:  server.BaseURI,
+				Tags:     server.Tags,
 			}
 
 			key := entity.EntityID + "|" + server.BaseURI
@@ -155,6 +192,11 @@ func (h *Handler) buildPageData() PageData {
 
 				if sv.LastChecked != nil {
 					sv.LastCheckedFormatted = sv.LastChecked.Format("2006-01-02 15:04:05")
+					// Can request check if last checked is older than priority min interval
+					sv.CanRequestCheck = time.Since(*sv.LastChecked) >= h.priorityMinInterval
+				} else {
+					// Never checked, can request
+					sv.CanRequestCheck = true
 				}
 				if sv.CertExpires != nil {
 					sv.CertExpiresFormatted = sv.CertExpires.Format("2006-01-02")
@@ -176,6 +218,7 @@ func (h *Handler) buildPageData() PageData {
 				}
 			} else {
 				sv.HealthStatus = "unchecked"
+				sv.CanRequestCheck = true
 				allChecked = false
 				data.UncheckedCount++
 			}

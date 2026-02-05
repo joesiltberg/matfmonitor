@@ -60,7 +60,9 @@ func main() {
 	)
 
 	// Initialize web handler
-	webHandler, err := web.NewHandler(dataStore, metadataStore)
+	// Refresh interval = time for one check cycle + 1 second buffer
+	refreshInterval := time.Duration(60/cfg.ChecksPerMinute)*time.Second + time.Second
+	webHandler, err := web.NewHandler(dataStore, metadataStore, scheduler, cfg.PriorityMinInterval, refreshInterval)
 	if err != nil {
 		log.Fatalf("Failed to initialize web handler: %v", err)
 	}
