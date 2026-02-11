@@ -26,6 +26,10 @@ jobs:
 
     - name: Test
       run: go test -v ./...
+
+    - name: Build command line binary
+      working-directory: ./cmd/matfmonitor
+      run: go build -v
       
     - name: Upload artifact
       uses: actions/upload-artifact@v4
