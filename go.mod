@@ -3,7 +3,7 @@ module github.com/joesiltberg/matfmonitor
 go 1.25.5
 
 require (
-	github.com/joesiltberg/bowness v1.1.7-0.20260130103624-0c8e20f5d8a8
+	github.com/joesiltberg/bowness v1.2.1
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.44.3
 )
